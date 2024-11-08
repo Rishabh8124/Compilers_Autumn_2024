@@ -16,7 +16,7 @@
     #define GARBAGE 9
 %}
 
-/*REGULAR DEFINITIONS*/ 
+/*REGULAR DEFINITIONS*/
 ID [_a-zA-Z][_a-zA-Z0-9]*
 WHITE_SPACE [ \t\n]
 OPEN_PARAN \(
