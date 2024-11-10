@@ -17,6 +17,7 @@
         public:
             string id;
             int current_register;
+            int latest;
 
             Symbol(string = "", int = -1);
     };

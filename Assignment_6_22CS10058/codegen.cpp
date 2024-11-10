@@ -4,7 +4,7 @@
 #include "y.tab.c"
 #include "lex.yy.c"
 
-Symbol::Symbol(string id, int reg): id(id), current_register(reg) { }
+Symbol::Symbol(string id, int reg): id(id), current_register(reg), latest(1) { }
 
 Quad::Quad(string op, string arg1, string arg2, string res): op(op), arg1(arg1), arg2(arg2), res(res), bl(0) { }
 
@@ -69,15 +69,75 @@ class Register {
     public:
         vector<Symbol *> vars;
         int score;
-        int latest;
 
-        Register(): score(0), latest(1) { vars.resize(0); }
+        Register(): score(0) { vars.resize(0); }
 };
 
 vector<Register> registers(5);
 
 map<string, int> block_use_count;
 map<int, int> update_line;
+
+int getRegisterResult() {
+    // Always the result is a temporary, hence it will be a new location
+
+    // Method 2
+    for (int i=0; i<5; i++) {
+        if (registers[i].vars.size() == 0) return i;
+    }
+
+    // Method 3
+    for (int i=0; i<5; i++) {
+        if (registers[i].score != 0) continue;
+        
+        for (auto x: registers[i].vars) x->current_register = -1;
+
+        registers[i].vars.clear();
+        registers[i].score = 0;
+
+        return i;
+    }
+
+    // Method 4
+    // Dummy step
+
+    // Method 5
+    for(int i=0; i<5; i++) {
+        int cond = 1;
+        for (auto x: registers[i].vars) {
+            if (x->id[0] != '$') { cond = 0; break; }
+            if (block_use_count[x->id]) { cond = 0; break; }
+        }
+
+        if (cond) {
+            registers[i].vars.clear();
+            registers[i].score = 0;
+            
+            return i;
+        }
+    }
+
+    // Method 6
+    int min_register = 0;
+    int min_score = registers[0].score;
+
+    for (int i=0; i<5; i++) {
+        if (registers[i].score < min_score) {
+            min_score = registers[i].score;
+            min_register = i;
+        }
+    }
+
+    for (auto x: registers[min_register].vars) {
+        if (x->latest == 0) emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
+        x->current_register = -1;
+    }
+
+    registers[min_register].vars.clear();
+    registers[min_register].score = 0;
+
+    return min_register;
+}
 
 vector<int> getRegisterOperand(Symbol * S1, Symbol * S2) {
 
@@ -98,6 +158,12 @@ vector<int> getRegisterOperand(Symbol * S1, Symbol * S2) {
     else if (regs[1] != -1) { blocked = regs[1]; free = 0; }
     else { blocked = -1; free = 2; }
 
+    if (S1 != NULL && S2 != NULL && S1->id == S2->id) {
+        regs[0] = getRegisterResult();
+        regs[1] = regs[0];
+        return regs;
+    }
+
     // Method 2
     for (int i=0; i<5; i++) {
         if (i == blocked) continue;
@@ -115,12 +181,11 @@ vector<int> getRegisterOperand(Symbol * S1, Symbol * S2) {
     // Method 3
     for (int i=0; i<5; i++) {
         if (i == blocked) continue;
-        if (registers[i].latest == 0) continue;
+        if (registers[i].score != 0) continue;
         
         for (auto x: registers[i].vars) x->current_register = -1;
 
         registers[i].vars.clear();
-        registers[i].latest = 1;
         registers[i].score = 0;
 
         if (free < 2) {
@@ -148,7 +213,6 @@ vector<int> getRegisterOperand(Symbol * S1, Symbol * S2) {
 
         if (cond) {
             registers[i].vars.clear();
-            registers[i].latest = 1;
             registers[i].score = 0;
 
             if (free < 2) {
@@ -183,13 +247,12 @@ vector<int> getRegisterOperand(Symbol * S1, Symbol * S2) {
     }
 
     for (auto x: registers[min_register].vars) {
-        emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
+        if (x->latest == 0) emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
         x->current_register = -1;
     }
 
     registers[min_register].vars.clear();
     registers[min_register].score = 0;
-    registers[min_register].latest = 1;
 
     if (free < 2) {
         regs[free] = min_register;
@@ -217,87 +280,24 @@ vector<int> getRegisterOperand(Symbol * S1, Symbol * S2) {
     }
 
     for (auto x: registers[min_register].vars) {
-        emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
+        if (x->latest == 0) emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
         x->current_register = -1;
     }
 
     registers[min_register].vars.clear();
     registers[min_register].score = 0;
-    registers[min_register].latest = 1;
     
     regs[free] = min_register;
     return regs;
 }
 
-int getRegisterResult() {
-    // Always the result is a temporary, hence it will be a new location
-
-    // Method 2
-    for (int i=0; i<5; i++) {
-        if (registers[i].vars.size() == 0) return i;
-    }
-
-    // Method 3
-    for (int i=0; i<5; i++) {
-        if (registers[i].latest == 0) continue;
-        
-        for (auto x: registers[i].vars) x->current_register = -1;
-
-        registers[i].vars.clear();
-        registers[i].latest = 1;
-        registers[i].score = 0;
-
-        return i;
-    }
-
-    // Method 4
-    // Dummy step
-
-    // Method 5
-    for(int i=0; i<5; i++) {
-        int cond = 1;
-        for (auto x: registers[i].vars) {
-            if (x->id[0] != '$') { cond = 0; break; }
-            if (block_use_count[x->id]) { cond = 0; break; }
-        }
-
-        if (cond) {
-            registers[i].vars.clear();
-            registers[i].latest = 1;
-            registers[i].score = 0;
-            
-            return i;
-        }
-    }
-
-    // Method 6
-    int min_register = 0;
-    int min_score = registers[0].score;
-
-    for (int i=0; i<5; i++) {
-        if (registers[i].score < min_score) {
-            min_score = registers[i].score;
-            min_register = i;
-        }
-    }
-
-    for (auto x: registers[min_register].vars) {
-        emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
-        x->current_register = -1;
-    }
-
-    registers[min_register].vars.clear();
-    registers[min_register].score = 0;
-    registers[min_register].latest = 1;
-
-    return min_register;
-}
-
 void end_of_block(int cond = 0) {
     for (auto x: global_table.symbols) {
         if (x->current_register != -1 && x->id[0] != '$') {
-            // if (cond) cout << x->current_register << " " << x->id << " " << registers[x->current_register].latest << endl;
-            if (registers[x->current_register].latest == 0) emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
+            if (x->latest == 0) {
+                emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
+                x->latest = 1;
+            }
             x->current_register = -1;
         }
     }
@@ -305,7 +305,6 @@ void end_of_block(int cond = 0) {
     for (int i=0; i<5; i++) {
         registers[i].vars.clear();
         registers[i].score = 0;
-        registers[i].latest = 1;
     }
 }
 
@@ -368,7 +367,30 @@ void tcg() {
             }
 
             block_use_count[x->arg1]--;
+            if (block_use_count[x->arg1] == 0 && x->arg1[0] == '$') {
+                int index = 0;
+                for(auto y: registers[temp1->current_register].vars) {
+                    if (y->id == x->res) {
+                        registers[temp1->current_register].vars.erase(registers[temp1->current_register].vars.begin()+index);
+                        registers[temp1->current_register].score--;
+                        break;
+                    }
+                    index++;
+                }
+            }
+
             block_use_count[x->arg2]--;
+            if (block_use_count[x->arg2] == 0 && x->arg2[0] == '$') {
+                int index = 0;
+                for(auto y: registers[temp2->current_register].vars) {
+                    if (y->id == x->res) {
+                        registers[temp2->current_register].vars.erase(registers[temp2->current_register].vars.begin()+index);
+                        registers[temp2->current_register].score--;
+                        break;
+                    }
+                    index++;
+                }
+            }
 
             int target_reg = getRegisterResult();
             string result_arg = x->res;
@@ -377,8 +399,8 @@ void tcg() {
             result_temp->current_register = target_reg;
 
             registers[target_reg].vars.push_back(result_temp);
-            registers[target_reg].latest = 0;
             registers[target_reg].score = 1;
+            result_temp->latest = 0;
 
             if (x->op == "+") emit_target(new Quad("ADD", arg1, arg2, result));
             if (x->op == "-") emit_target(new Quad("SUB", arg1, arg2, result));
@@ -400,6 +422,7 @@ void tcg() {
                     for(auto y: registers[result_temp->current_register].vars) {
                         if (y->id == x->res) {
                             registers[result_temp->current_register].vars.erase(registers[result_temp->current_register].vars.begin()+index);
+                            if (result_temp->latest == 0) registers[result_temp->current_register].score--;
                             break;
                         }
                         index++;
@@ -407,20 +430,33 @@ void tcg() {
                 }
 
                 result_temp->current_register = target_reg;
+                result_temp->latest = 0;
+
                 registers[target_reg].vars.push_back(result_temp);
-                registers[target_reg].latest = 0;
                 registers[target_reg].score = 1;
             } else if (arg[0] == '$') {
                 Symbol * arg = global_table.lookup(x->arg1);
                 Symbol * result_temp = global_table.lookup(x->res);
 
                 block_use_count[x->arg1]--;
+                if (block_use_count[x->arg1] == 0 && x->arg1[0] == '$') {
+                    int index = 0;
+                    for(auto y: registers[result_temp->current_register].vars) {
+                        if (y->id == x->res) {
+                            registers[result_temp->current_register].vars.erase(registers[result_temp->current_register].vars.begin()+index);
+                            registers[result_temp->current_register].score--;
+                            break;
+                        }
+                        index++;
+                    }
+                }
 
                 if (result_temp->current_register != -1) {
                     int index = 0;
                     for(auto y: registers[result_temp->current_register].vars) {
                         if (y->id == x->res) {
                             registers[result_temp->current_register].vars.erase(registers[result_temp->current_register].vars.begin()+index);
+                            if (result_temp->latest == 0) registers[result_temp->current_register].score--;
                             break;
                         }
 
@@ -429,6 +465,7 @@ void tcg() {
                 }
 
                 result_temp->current_register = arg->current_register;
+                result_temp->latest = 0;
                 registers[arg->current_register].vars.push_back(result_temp);
                 registers[arg->current_register].score++;
             } else {
@@ -450,6 +487,7 @@ void tcg() {
                         for(auto y: registers[result_temp->current_register].vars) {
                             if (y->id == x->res) {
                                 registers[result_temp->current_register].vars.erase(registers[result_temp->current_register].vars.begin()+index);
+                                if (result_temp->latest == 0) registers[result_temp->current_register].score--;
                                 break;
                             }
 
@@ -458,8 +496,9 @@ void tcg() {
                     }
 
                     result_temp->current_register = regs[0];
+                    result_temp->latest = 0;
+
                     registers[regs[0]].vars.push_back(result_temp);
-                    registers[regs[0]].latest = 0;
                     registers[regs[0]].score++;
                 }
             }
@@ -503,7 +542,30 @@ void tcg() {
             }
 
             block_use_count[x->arg1]--;
+            if (block_use_count[x->arg1] == 0 && x->arg1[0] == '$') {
+                int index = 0;
+                for(auto y: registers[temp1->current_register].vars) {
+                    if (y->id == x->res) {
+                        registers[temp1->current_register].vars.erase(registers[temp1->current_register].vars.begin()+index);
+                        registers[temp1->current_register].score--;
+                        break;
+                    }
+                    index++;
+                }
+            }
+
             block_use_count[x->arg2]--;
+            if (block_use_count[x->arg2] == 0 && x->arg2[0] == '$') {
+                int index = 0;
+                for(auto y: registers[temp2->current_register].vars) {
+                    if (y->id == x->res) {
+                        registers[temp2->current_register].vars.erase(registers[temp2->current_register].vars.begin()+index);
+                        registers[temp2->current_register].score--;
+                        break;
+                    }
+                    index++;
+                }
+            }
 
             Quad * temp;
             if (x->op == "=")  temp = new Quad("JNE", arg1, arg2, x->res);
@@ -516,6 +578,7 @@ void tcg() {
             end_of_block();
             emit_target(temp);
         } else {
+            cout << "Hello" << endl;
             emit_target(new Quad("end"));
         }
 

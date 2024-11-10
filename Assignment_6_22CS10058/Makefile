@@ -13,4 +13,4 @@ run:
 	cat Target_code.txt
 
 clean:
-	rm -f codegen Intermediate_code.txt Target_code.txt lex.yy.c y.tab.h y.tab.c intcode.c ic a.out
+	rm -f codegen Intermediate_code.txt Target_code.txt lex.yy.c y.tab.h y.tab.c a.out
