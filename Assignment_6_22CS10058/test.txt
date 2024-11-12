@@ -24,6 +24,8 @@
 
 (set x (+ (+ 1 2) (+ (+ 3 4) (+ (+ 5 6) (+ (+ 7 8) (+ (+ 9 10) (+ 11 12)))))))
 
+(set x (+ (+ 1 2) (+ (+ 3 4) (+ (+ 5 6) (+ (+ 7 8) (+ (+ 9 10) (+ (+ 11 12) (+ (+ 13 14) (+ (+ 15 16) (+ (+ 17 18) (+ 19 20)))))))))))
+
 (set x 0)
 (set x1 x)
 (set x2 x)
@@ -46,3 +48,29 @@
 (set x1 a)
 (set x2 a)
 
+(set a 5)
+(set b 0)
+(loop while (<= b 10)
+    (set b (+ b (* a a)))
+)
+
+(set x 1)
+(set x1 x)
+(set x2 x)
+(set x3 x)
+(set y 1)
+(set y1 y)
+(set y2 y)
+(set y3 y)
+(set z 1)
+(set z1 z)
+(set z2 z)
+(set z3 z)
+(set a 1)
+(set a1 a)
+(set a2 a)
+(set b 3)
+(set d 3)
+(set d1 d)
+(set d2 d)
+(set c (+ b a))

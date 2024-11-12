@@ -53,41 +53,50 @@ char * string_to_char(string s) {
 }
 
 // Emit functions
-void emit(Quad * quad) {
+void emit(Quad * quad) {                    // Emit intermediate code
     quads.push_back(quad);
     instr_line++;
 }
 
-void emit_target(Quad * target) {
+void emit_target(Quad * target) {           // Emit target code
     target_code.push_back(target);
     target_code_number++;
 }
 
 // Target Code Generation
 
-class Register {
-    public:
-        vector<Symbol *> vars;
-        int score;
+class Register {                            // Data structure to store and process information related to registers
+    public: 
+        vector<Symbol *> vars;              // Set of variables pointing to the value stored in this register
+        int score;                          // Number of variables which are pointing here and do not have their value in sync with memory
 
         Register(): score(0) { vars.resize(0); }
 };
 
+int n;                                      // Number of registers (overwritten through command-line argument)
 vector<Register> registers(5);
 
-map<string, int> block_use_count;
-map<int, int> update_line;
+map<string, int> block_use_count;           // Count of variables being used in a single block (Computed at the start of a block)
+map<int, int> update_line;                  // Used for updating goto lines in target code
 
 int getRegisterResult() {
     // Always the result is a temporary, hence it will be a new location
 
+    // Method 1
+    // Since the result is always a new temporary it will not be stored in old register
+
     // Method 2
-    for (int i=0; i<5; i++) {
+    // Free registers
+    // If T = A op B and if A and B are not used later in the block the same register of A or B can be used
+
+    for (int i=0; i<n; i++) {
         if (registers[i].vars.size() == 0) return i;
     }
 
     // Method 3
-    for (int i=0; i<5; i++) {
+    // All values are in sync with memory
+    // Score = 0 means all the variable pointing to this register are in sync with the memory
+    for (int i=0; i<n; i++) {
         if (registers[i].score != 0) continue;
         
         for (auto x: registers[i].vars) x->current_register = -1;
@@ -99,10 +108,12 @@ int getRegisterResult() {
     }
 
     // Method 4
-    // Dummy step
+    // Since T is always a new temporary it will never be equal to A and B
 
     // Method 5
-    for(int i=0; i<5; i++) {
+    // Temporaries are not used below further in that block
+
+    for(int i=0; i<n; i++) {
         int cond = 1;
         for (auto x: registers[i].vars) {
             if (x->id[0] != '$') { cond = 0; break; }
@@ -118,18 +129,30 @@ int getRegisterResult() {
     }
 
     // Method 6
+    // Choosing register with the minimum score
+    // Recalculating score because temporaries with no use below should not be stored and hence should not be included in calculation of score
+    int scores[n];
+    for (int i=0; i<n; i++) {
+        scores[i] = registers[i].score;
+        for(auto x: registers[i].vars) {
+            if (x->id[0] == '$' && block_use_count[x->id] == 0) scores[i]--;
+        }
+    }
     int min_register = 0;
-    int min_score = registers[0].score;
+    int min_score = scores[0];
 
-    for (int i=0; i<5; i++) {
-        if (registers[i].score < min_score) {
-            min_score = registers[i].score;
+    for (int i=0; i<n; i++) {
+        if (scores[i] < min_score) {
+            min_score = scores[i];
             min_register = i;
         }
     }
 
     for (auto x: registers[min_register].vars) {
-        if (x->latest == 0) emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
+        if ((x->id[0]!='$' && x->latest == 0) || (x->id[0] == '$' && block_use_count[x->id])) {
+            emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
+            x->latest = 1;
+        }
         x->current_register = -1;
     }
 
@@ -141,18 +164,22 @@ int getRegisterResult() {
 
 vector<int> getRegisterOperand(Symbol * S1, Symbol * S2) {
 
+    // Both the operands are searched together to prevent the register used for one operand from being used for the other one
+    // If the input parameter is NULL, it means it is a numerical value
+
     vector<int> regs(2);
 
     if (S1 != NULL) regs[0] = S1->current_register;
-    else regs[0] = 5;
+    else regs[0] = n;
 
     if (S2 != NULL) regs[1] = S2->current_register;
-    else regs[1] = 5;
+    else regs[1] = n;
 
-    int blocked;
+    int blocked;        // Tells which register is blocked by the operand whose register has 
     int free;
 
     // Method 1
+    // If the variable being searched is already present in a register, use it
     if (regs[0] != -1 && regs[1] != -1) return regs;
     else if (regs[0] != -1) { blocked = regs[0]; free = 1; }
     else if (regs[1] != -1) { blocked = regs[1]; free = 0; }
@@ -165,7 +192,8 @@ vector<int> getRegisterOperand(Symbol * S1, Symbol * S2) {
     }
 
     // Method 2
-    for (int i=0; i<5; i++) {
+    // Free registers
+    for (int i=0; i<n; i++) {
         if (i == blocked) continue;
         if (registers[i].vars.size()) continue;
         if (free < 2) {
@@ -179,7 +207,8 @@ vector<int> getRegisterOperand(Symbol * S1, Symbol * S2) {
     }
 
     // Method 3
-    for (int i=0; i<5; i++) {
+    // All the variables in the register are in sync with the memory
+    for (int i=0; i<n; i++) {
         if (i == blocked) continue;
         if (registers[i].score != 0) continue;
         
@@ -202,7 +231,8 @@ vector<int> getRegisterOperand(Symbol * S1, Symbol * S2) {
     // Dummy case, T is always new and is never equal to A and B (atleast in this grammar)
 
     // Method 5
-    for(int i=0; i<5; i++) {
+    // Temporaries not being used below
+    for(int i=0; i<n; i++) {
         if (i == blocked) continue;
         
         int cond = 1;
@@ -227,27 +257,41 @@ vector<int> getRegisterOperand(Symbol * S1, Symbol * S2) {
     }
 
     // Method 6
+    // Register with the minimum score
+    // Recalculation of score (to remove the temporary contributing to the existing score if it is not used below)
+
+    int scores[n];
+    for (int i=0; i<n; i++) {
+        scores[i] = registers[i].score;
+        for(auto x: registers[i].vars) {
+            if (x->id[0] == '$' && block_use_count[x->id] == 0) scores[i]--;
+        }
+    }
+    
     int min_register;
     int min_score;
 
     if (blocked == 0) {
         min_register = 1;
-        min_score = registers[1].score;
+        min_score = scores[1];
     } else {
         min_register = 0;
-        min_score = registers[0].score;
+        min_score = scores[0];
     }
 
-    for (int i=0; i<5; i++) {
+    for (int i=0; i<n; i++) {
         if (i == blocked) continue;
-        if (registers[i].score < min_score) {
-            min_score = registers[i].score;
+        if (scores[i] < min_score) {
+            min_score = scores[i];
             min_register = i;
         }
     }
 
     for (auto x: registers[min_register].vars) {
-        if (x->latest == 0) emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
+        if ((x->id[0]!='$' && x->latest == 0) || (x->id[0] == '$' && block_use_count[x->id])) {
+            emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
+            x->latest = 1;
+        }
         x->current_register = -1;
     }
 
@@ -265,22 +309,25 @@ vector<int> getRegisterOperand(Symbol * S1, Symbol * S2) {
 
     if (blocked == 0) {
         min_register = 1;
-        min_score = registers[1].score;
+        min_score = scores[1];
     } else {
         min_register = 0;
-        min_score = registers[0].score;
+        min_score = scores[0];
     }
 
-    for (int i=0; i<5; i++) {
+    for (int i=0; i<n; i++) {
         if (i == blocked) continue;
-        if (registers[i].score < min_score) {
-            min_score = registers[i].score;
+        if (scores[i] < min_score) {
+            min_score = scores[i];
             min_register = i;
         }
     }
 
     for (auto x: registers[min_register].vars) {
-        if (x->latest == 0) emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
+        if ((x->id[0]!='$' && x->latest == 0) || (x->id[0] == '$' && block_use_count[x->id])) {
+            emit_target(new Quad("ST", "R"+int_to_string(x->current_register+1), "", x->id));
+            x->latest = 1;
+        }
         x->current_register = -1;
     }
 
@@ -291,7 +338,7 @@ vector<int> getRegisterOperand(Symbol * S1, Symbol * S2) {
     return regs;
 }
 
-void end_of_block(int cond = 0) {
+void end_of_block() {   // Store variables not in sync with memory at the end of block
     for (auto x: global_table.symbols) {
         if (x->current_register != -1 && x->id[0] != '$') {
             if (x->latest == 0) {
@@ -302,7 +349,7 @@ void end_of_block(int cond = 0) {
         }
     }
 
-    for (int i=0; i<5; i++) {
+    for (int i=0; i<n; i++) {
         registers[i].vars.clear();
         registers[i].score = 0;
     }
@@ -312,14 +359,16 @@ void tcg() {
     int i = 0;
     for (auto x: quads) {
         i++;
+
+        // Pre processing block, for usage count of operands
         if (x->bl) {
             end_of_block();
             block_use_count.clear();
 
-            int temp = i;
             block_use_count[x->arg1]++;
             block_use_count[x->arg2]++;
 
+            int temp = i;
             while(temp<quads.size() && quads[temp]->bl == 0) {
                 block_use_count[quads[temp]->arg1]++;
                 block_use_count[quads[temp]->arg2]++;
@@ -327,10 +376,15 @@ void tcg() {
             }
         }
 
+        // Map intermediate code line to target code line (used for jmp target in target code)
         int ql = target_code.size();
         update_line[i] = ql+1;
         
-        if (x->op == "+" || x->op == "-" || x->op == "/" || x->op == "*" || x->op == "%") {
+
+        // Conversion to target code casewise
+        if (x->op == "+" || x->op == "-" || x->op == "/" || x->op == "*" || x->op == "%") { // Arithmetic operations
+
+            // Argument 1 and Argument 2 smbol reference from symbol table
             Symbol * temp1, * temp2;
             string arg1 = x->arg1;
             if (arg1[0] > '9' || arg1[0] < '0') {
@@ -346,51 +400,32 @@ void tcg() {
                 temp2 = NULL;
             }
 
+            // Fetching register for operands
             vector<int> regs = getRegisterOperand(temp1, temp2);
 
-            if (temp1 != NULL && temp1->current_register == -1) {
+            if (temp1 != NULL && temp1->current_register == -1) {   // Variable not found in register and has to be loaded
                 arg1 = "R"+int_to_string(regs[0]+1);
                 registers[regs[0]].vars.push_back(temp1);
                 temp1->current_register = regs[0];
                 emit_target(new Quad("LD", temp1->id, "", arg1));
-            } else if (temp1 != NULL) {
+            } else if (temp1 != NULL) {                             // Variable found in register
                 arg1 = "R"+int_to_string(regs[0]+1);
             }
 
-            if (temp2 != NULL && temp2->current_register == -1) {
+            if (temp2 != NULL && temp2->current_register == -1) {   // Variable not found in register and has to be loaded
                 arg2 = "R"+int_to_string(regs[1]+1);
                 registers[regs[1]].vars.push_back(temp2);
                 temp2->current_register = regs[1];
                 emit_target(new Quad("LD", temp2->id, "", arg2));
-            } else if (temp2 != NULL) {
+            } else if (temp2 != NULL) {                             // Variable found in register
                 arg2 = "R"+int_to_string(regs[1]+1);
             }
 
             block_use_count[x->arg1]--;
-            if (block_use_count[x->arg1] == 0 && x->arg1[0] == '$') {
-                int index = 0;
-                for(auto y: registers[temp1->current_register].vars) {
-                    if (y->id == x->res) {
-                        registers[temp1->current_register].vars.erase(registers[temp1->current_register].vars.begin()+index);
-                        registers[temp1->current_register].score--;
-                        break;
-                    }
-                    index++;
-                }
-            }
-
             block_use_count[x->arg2]--;
-            if (block_use_count[x->arg2] == 0 && x->arg2[0] == '$') {
-                int index = 0;
-                for(auto y: registers[temp2->current_register].vars) {
-                    if (y->id == x->res) {
-                        registers[temp2->current_register].vars.erase(registers[temp2->current_register].vars.begin()+index);
-                        registers[temp2->current_register].score--;
-                        break;
-                    }
-                    index++;
-                }
-            }
+
+            // Fetching register for result
+            // Result is always a new temporary, hence it wil not be found in register and the register being assigned will be new (cleaned/empty) before assigned
 
             int target_reg = getRegisterResult();
             string result_arg = x->res;
@@ -402,26 +437,35 @@ void tcg() {
             registers[target_reg].score = 1;
             result_temp->latest = 0;
 
+
             if (x->op == "+") emit_target(new Quad("ADD", arg1, arg2, result));
             if (x->op == "-") emit_target(new Quad("SUB", arg1, arg2, result));
             if (x->op == "*") emit_target(new Quad("MUL", arg1, arg2, result));
             if (x->op == "/") emit_target(new Quad("DIV", arg1, arg2, result));
             if (x->op == "%") emit_target(new Quad("REM", arg1, arg2, result));
-        } else if (x->op == ":=") {
+
+        } else if (x->op == ":=") { // Assignment operations
+            // All assignment operations will be variable = ()
+            // There is no occasion where a temporary is assigned a value directly, it is only if it is computing a result
+
             string arg = x->arg1;
 
             if (arg[0]>='0' && arg[0] <= '9') {
+                // Load the integer value in a register and assign it to the variable
+
                 int target_reg = getRegisterResult();
                 string result = "R"+int_to_string(target_reg+1);
                 emit_target(new Quad("LDI", arg, "", result));
 
                 Symbol * result_temp = global_table.lookup(x->res);
 
-                if (result_temp->current_register != -1) {
+                if (result_temp->current_register != -1) {  // Th resultant variable was initially present in a register and has to be removed from there
                     int index = 0;
                     for(auto y: registers[result_temp->current_register].vars) {
                         if (y->id == x->res) {
                             registers[result_temp->current_register].vars.erase(registers[result_temp->current_register].vars.begin()+index);
+
+                            // If the variable stored before was not in sync with the memory, the score of the register will be reduced on storing removing this variable from that register
                             if (result_temp->latest == 0) registers[result_temp->current_register].score--;
                             break;
                         }
@@ -434,26 +478,20 @@ void tcg() {
 
                 registers[target_reg].vars.push_back(result_temp);
                 registers[target_reg].score = 1;
+
             } else if (arg[0] == '$') {
+                // This condition is reached during operation (set variable expr)
+                // The last calculation of expr is done in a register and will be available for sure in a register
+                // Hence there is no need to fetch a register for the temporarily manually, the information is directly available in the symbol table
+
                 Symbol * arg = global_table.lookup(x->arg1);
                 Symbol * result_temp = global_table.lookup(x->res);
 
                 block_use_count[x->arg1]--;
-                if (block_use_count[x->arg1] == 0 && x->arg1[0] == '$') {
-                    int index = 0;
-                    for(auto y: registers[result_temp->current_register].vars) {
-                        if (y->id == x->res) {
-                            registers[result_temp->current_register].vars.erase(registers[result_temp->current_register].vars.begin()+index);
-                            registers[result_temp->current_register].score--;
-                            break;
-                        }
-                        index++;
-                    }
-                }
 
                 if (result_temp->current_register != -1) {
                     int index = 0;
-                    for(auto y: registers[result_temp->current_register].vars) {
+                    for(auto y: registers[result_temp->current_register].vars) {    // Updating the old register
                         if (y->id == x->res) {
                             registers[result_temp->current_register].vars.erase(registers[result_temp->current_register].vars.begin()+index);
                             if (result_temp->latest == 0) registers[result_temp->current_register].score--;
@@ -468,7 +506,10 @@ void tcg() {
                 result_temp->latest = 0;
                 registers[arg->current_register].vars.push_back(result_temp);
                 registers[arg->current_register].score++;
+
             } else {
+                // variable = variable
+
                 Symbol * arg = global_table.lookup(x->arg1);
                 vector<int> regs = getRegisterOperand(arg, NULL);
 
@@ -503,9 +544,12 @@ void tcg() {
                 }
             }
         } else if (x->op == "goto") {
-            end_of_block(1);
+            end_of_block();
             emit_target(new Quad("JMP", "", "", x->res));
         } else if (x->op == "=" || x->op == "/=" || x->op == "<" || x->op == ">" || x->op == "<=" || x->op == ">=") {
+            // Boolean statements
+            // Conditional jumps
+            
             Symbol * temp1, * temp2;
             string arg1 = x->arg1;
             if (arg1[0] > '9' || arg1[0] < '0') {
@@ -542,30 +586,7 @@ void tcg() {
             }
 
             block_use_count[x->arg1]--;
-            if (block_use_count[x->arg1] == 0 && x->arg1[0] == '$') {
-                int index = 0;
-                for(auto y: registers[temp1->current_register].vars) {
-                    if (y->id == x->res) {
-                        registers[temp1->current_register].vars.erase(registers[temp1->current_register].vars.begin()+index);
-                        registers[temp1->current_register].score--;
-                        break;
-                    }
-                    index++;
-                }
-            }
-
             block_use_count[x->arg2]--;
-            if (block_use_count[x->arg2] == 0 && x->arg2[0] == '$') {
-                int index = 0;
-                for(auto y: registers[temp2->current_register].vars) {
-                    if (y->id == x->res) {
-                        registers[temp2->current_register].vars.erase(registers[temp2->current_register].vars.begin()+index);
-                        registers[temp2->current_register].score--;
-                        break;
-                    }
-                    index++;
-                }
-            }
 
             Quad * temp;
             if (x->op == "=")  temp = new Quad("JNE", arg1, arg2, x->res);
@@ -574,11 +595,11 @@ void tcg() {
             if (x->op == ">")  temp = new Quad("JLE", arg1, arg2, x->res);
             if (x->op == "<=") temp = new Quad("JGT", arg1, arg2, x->res);
             if (x->op == ">=") temp = new Quad("JLT", arg1, arg2, x->res);
-
+            
+            // Storing variables should be done before the jmp statement
             end_of_block();
             emit_target(temp);
         } else {
-            cout << "Hello" << endl;
             emit_target(new Quad("end"));
         }
 
@@ -616,7 +637,7 @@ void print_quad() {
         }
     }
 
-    cout << endl;
+    target_file << endl;
 
     target_file.close();
 }
@@ -649,14 +670,31 @@ void print_target() {
     target_file.close();
 }
 
-int main() {
+int main(int argc, char * argv[]) {
+
+    if (argc > 1) {
+        n = atoi(argv[1]);
+        if (n<2) n = 5;
+        registers.resize(n);
+    } else {
+        n = 5;
+    }
+
     yyparse();
     
-    print_quad();
+    if (error_bool == 0) {
+        print_quad();
+        tcg();
+        print_target();
+    } else {
+        ofstream target_file("Intermediate_code.txt");
+        target_file << "\nIntermediate code not generated due to syntax error\n" << endl;
+        target_file.close();
 
-    tcg();
+        ofstream target_file_1("Target_code.txt");
+        target_file_1 << "\nTarget code not generated due to syntax error\n" << endl;
+        target_file_1.close();
 
-    print_target();
-
+    }
     return 0;
 }

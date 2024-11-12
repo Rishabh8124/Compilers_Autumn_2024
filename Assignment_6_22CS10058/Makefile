@@ -8,7 +8,8 @@ all:
 	g++ ${C_FILE} -o codegen
 
 run:
-	./codegen < sample.txt
+	@read -p "Enter number of registers (less than 2 will run with default value 5): " regCount; \
+	./codegen $$regCount < sample.txt
 	cat Intermediate_code.txt
 	cat Target_code.txt
 
